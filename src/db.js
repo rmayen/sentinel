@@ -23,6 +23,7 @@ export function initDb(path = 'sentinel.db') {
       findings    TEXT,
       FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE
     );
+    CREATE INDEX IF NOT EXISTS idx_checks_site_ts ON checks(site_id, ts DESC);
   `);
   return db;
 }
@@ -45,7 +46,7 @@ export function deleteSite(id) {
 // Each site with its most recent check attached (or null if never checked).
 export function listSites() {
   const sites = db.prepare('SELECT * FROM sites ORDER BY created_at DESC').all();
-  const latest = db.prepare('SELECT * FROM checks WHERE site_id = ? ORDER BY ts DESC LIMIT 1');
+  const latest = db.prepare('SELECT * FROM checks WHERE site_id = ? ORDER BY ts DESC, id DESC LIMIT 1');
   return sites.map((s) => ({ ...s, latest: parseCheck(latest.get(s.id)) }));
 }
 
@@ -69,7 +70,7 @@ export function insertCheck(siteId, result) {
 
 export function listChecks(siteId, limit = 50) {
   return db
-    .prepare('SELECT * FROM checks WHERE site_id = ? ORDER BY ts DESC LIMIT ?')
+    .prepare('SELECT * FROM checks WHERE site_id = ? ORDER BY ts DESC, id DESC LIMIT ?')
     .all(siteId, limit)
     .map(parseCheck);
 }

@@ -15,11 +15,29 @@ a plain HTML/CSS/JavaScript dashboard on top.
 
 - Uptime checks with status code and response time for each monitored site
 - HTTP security-header audit (HSTS, CSP, X-Content-Type-Options, X-Frame-Options,
-  Referrer-Policy, Permissions-Policy) scored to an A–F grade
-- Full check history per site, stored in SQLite
+  Referrer-Policy, Permissions-Policy) scored to an A–F grade. Header *values* are
+  validated, not just their presence — `max-age=0` HSTS or a bad `X-Frame-Options`
+  earns no credit.
+- Full check history per site, stored in SQLite (indexed on `site_id, ts`)
 - Token-based sign-in (HMAC-signed, constant-time password check)
 - Web dashboard to add sites, run checks, and browse history
 - No runtime dependencies
+
+## Security
+
+Because Sentinel fetches user-supplied URLs, it is built to resist being misused:
+
+- **SSRF protection** — before any fetch, the target is resolved and rejected if it
+  points at a loopback, private, link-local, or otherwise reserved address (this
+  blocks `localhost`, internal LANs, and cloud metadata at `169.254.169.254`). Only
+  `http`/`https` schemes are allowed.
+- **No insecure defaults** — the server refuses to start without `SENTINEL_PASSWORD`,
+  and generates a random signing secret if none is provided.
+- **Login rate limiting** — repeated failed logins from an address are throttled.
+- **Request body size limit** — oversized payloads are rejected with `413`.
+- **Security response headers** — Sentinel serves its own dashboard with
+  `Content-Security-Policy`, `X-Frame-Options`, `X-Content-Type-Options`, and
+  `Referrer-Policy`.
 
 ## Requirements
 
@@ -90,11 +108,15 @@ curl -s -XPOST localhost:3000/api/sites \
 npm test
 ```
 
-The suite covers the security-header grading logic and the token
-sign/verify flow.
+The suite covers the security-header grading and value validation, the token
+sign/verify flow, the SSRF address checks, the database layer, and the HTTP API
+end to end (auth, SSRF blocking on add, rate limiting, and body-size limits).
 
 ## Notes
 
 - Checks are run on demand from the dashboard (or the API). Scheduling them on an
   interval — with `cron` or a small loop — is a natural next step.
 - The SQLite file (`sentinel.db`) and `.env` are gitignored.
+- The SSRF guard resolves the host and validates it before fetching. A fully
+  robust deployment behind untrusted input would also pin the resolved address
+  through the request to close the DNS-rebinding gap.

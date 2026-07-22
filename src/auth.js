@@ -1,30 +1,35 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual, randomBytes } from 'node:crypto';
 
-const SECRET = process.env.SENTINEL_SECRET || 'dev-insecure-secret-change-me';
-const PASSWORD = process.env.SENTINEL_PASSWORD || 'admin';
-const TTL_MS = 12 * 60 * 60 * 1000; // tokens last 12 hours
+// Creates an auth helper bound to a password and signing secret. There are no
+// insecure fallback defaults: a password must be supplied. If no secret is
+// given, a random one is generated for the process (tokens then reset on
+// restart, which is a safe default).
+export function createAuth({ password, secret, ttlMs = 12 * 60 * 60 * 1000 } = {}) {
+  if (!password) throw new Error('createAuth: a password is required');
+  const key = secret || randomBytes(32).toString('hex');
 
-function sign(payload) {
-  return createHmac('sha256', SECRET).update(payload).digest('base64url');
-}
+  const sign = (payload) => createHmac('sha256', key).update(payload).digest('base64url');
 
-// Returns a signed token on success, or null if the password is wrong.
-export function login(password) {
-  if (!constantTimeEqual(password, PASSWORD)) return null;
-  const payload = Buffer.from(JSON.stringify({ exp: Date.now() + TTL_MS })).toString('base64url');
-  return `${payload}.${sign(payload)}`;
-}
-
-export function verify(token) {
-  if (typeof token !== 'string' || !token.includes('.')) return false;
-  const [payload, sig] = token.split('.');
-  if (sign(payload) !== sig) return false;
-  try {
-    const { exp } = JSON.parse(Buffer.from(payload, 'base64url').toString());
-    return typeof exp === 'number' && Date.now() < exp;
-  } catch {
-    return false;
+  function login(attempt) {
+    if (!constantTimeEqual(attempt, password)) return null;
+    const payload = Buffer.from(JSON.stringify({ exp: Date.now() + ttlMs })).toString('base64url');
+    return `${payload}.${sign(payload)}`;
   }
+
+  function verify(token) {
+    if (typeof token !== 'string' || !token.includes('.')) return false;
+    const [payload, sig] = token.split('.');
+    const expected = sign(payload);
+    if (!constantTimeEqual(sig, expected)) return false;
+    try {
+      const { exp } = JSON.parse(Buffer.from(payload, 'base64url').toString());
+      return typeof exp === 'number' && Date.now() < exp;
+    } catch {
+      return false;
+    }
+  }
+
+  return { login, verify };
 }
 
 function constantTimeEqual(a, b) {
