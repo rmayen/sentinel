@@ -7,12 +7,15 @@ import { checkSite } from './monitor.js';
 import { assertSafeUrl } from './ssrf.js';
 import { createAuth } from './auth.js';
 import { loadEnv } from './env.js';
+import { startScheduler } from './scheduler.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, '..', 'public');
 
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
 const MAX_BODY_BYTES = 64 * 1024; // reject oversized request bodies
+const MAX_URL_LEN = 2048;
+const MAX_LABEL_LEN = 100;
 const LOGIN_MAX_ATTEMPTS = 5; // failed logins allowed per window, per IP
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 
@@ -46,6 +49,14 @@ export function createApp({ dbPath, auth, staticDir = PUBLIC_DIR } = {}) {
       entry.count += 1;
     }
   }
+  // Drop expired entries so the map can't grow unbounded under many attacking IPs.
+  const cleanup = setInterval(() => {
+    const now = Date.now();
+    for (const [ip, entry] of loginAttempts) {
+      if (now > entry.resetAt) loginAttempts.delete(ip);
+    }
+  }, LOGIN_WINDOW_MS);
+  cleanup.unref();
 
   function setSecurity(res) {
     for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
@@ -66,9 +77,9 @@ export function createApp({ dbPath, auth, staticDir = PUBLIC_DIR } = {}) {
     }
     if (chunks.length === 0) return {};
     try {
-      return JSON.parse(Buffer.concat(chunks).toString());
+      return JSON.parse(Buffer.concat(chunks).toString('utf8'));
     } catch {
-      return {};
+      throw new InvalidJson();
     }
   }
 
@@ -97,15 +108,26 @@ export function createApp({ dbPath, auth, staticDir = PUBLIC_DIR } = {}) {
 
     if (path === '/api/sites' && req.method === 'POST') {
       const { url, label } = await readJson(req);
+      if (typeof url !== 'string' || url.length > MAX_URL_LEN) {
+        return json(res, 400, { error: 'url must be a string of at most 2048 characters' });
+      }
+      if (label != null && (typeof label !== 'string' || label.trim().length > MAX_LABEL_LEN)) {
+        return json(res, 400, { error: 'label must be at most 100 characters' });
+      }
       try {
         await assertSafeUrl(url);
       } catch (err) {
         return json(res, 400, { error: err.message });
       }
+      const normalized = new URL(url).href;
       try {
-        return json(res, 201, { site: addSite(url, label) });
-      } catch {
-        return json(res, 409, { error: 'that url is already being monitored' });
+        return json(res, 201, { site: addSite(normalized, label ? label.trim() : null) });
+      } catch (err) {
+        if (/UNIQUE/i.test(err.message)) {
+          return json(res, 409, { error: 'that url is already being monitored' });
+        }
+        console.error('addSite failed:', err);
+        return json(res, 500, { error: 'could not save site' });
       }
     }
 
@@ -163,12 +185,14 @@ export function createApp({ dbPath, auth, staticDir = PUBLIC_DIR } = {}) {
       }
     } catch (err) {
       if (err instanceof PayloadTooLarge) return json(res, 413, { error: 'request body too large' });
+      if (err instanceof InvalidJson) return json(res, 400, { error: 'invalid JSON body' });
       json(res, 500, { error: 'server error' });
     }
   });
 }
 
 class PayloadTooLarge extends Error {}
+class InvalidJson extends Error {}
 
 // Start a real server only when run directly. Config comes from the
 // environment; there are no insecure fallback credentials.
@@ -186,4 +210,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const dbPath = process.env.SENTINEL_DB || join(__dirname, '..', 'sentinel.db');
   const port = Number(process.env.PORT) || 3000;
   createApp({ dbPath, auth }).listen(port, () => console.log(`Sentinel running on http://localhost:${port}`));
+
+  // Optional automatic monitoring: set SENTINEL_INTERVAL_MINUTES to enable.
+  const minutes = Number(process.env.SENTINEL_INTERVAL_MINUTES);
+  if (minutes > 0) {
+    startScheduler({ intervalMs: minutes * 60 * 1000, onError: (e) => console.error('scheduled check failed:', e) });
+    console.log(`Automatic checks every ${minutes} minute(s).`);
+  }
 }

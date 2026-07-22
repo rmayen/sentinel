@@ -30,7 +30,11 @@ Because Sentinel fetches user-supplied URLs, it is built to resist being misused
 - **SSRF protection** — before any fetch, the target is resolved and rejected if it
   points at a loopback, private, link-local, or otherwise reserved address (this
   blocks `localhost`, internal LANs, and cloud metadata at `169.254.169.254`). Only
-  `http`/`https` schemes are allowed.
+  `http`/`https` schemes are allowed. Redirects are followed **manually and
+  re-validated at every hop**, so a public URL cannot bounce the request to an
+  internal address.
+- **Input limits** — URLs and labels are length-checked and the URL is normalized
+  before storage; malformed JSON is rejected with `400`.
 - **No insecure defaults** — the server refuses to start without `SENTINEL_PASSWORD`,
   and generates a random signing secret if none is provided.
 - **Login rate limiting** — repeated failed logins from an address are throttled.
@@ -63,11 +67,27 @@ npm start          # or: node --no-warnings src/server.js
 
 Then open `http://localhost:3000` and sign in with your `SENTINEL_PASSWORD`.
 
+### Automatic checks
+
+By default, checks run on demand. To have Sentinel check every site on a schedule,
+set `SENTINEL_INTERVAL_MINUTES` in `.env` (for example, `10`). Leave it unset to
+keep checks on-demand only.
+
 ## How the security grade works
 
-Each check inspects the response headers for six common security headers. HSTS
-and Content-Security-Policy are weighted more heavily because they carry the most
-protection. The weighted score is mapped to a letter grade:
+Each check produces a **security-header posture score** — it reflects how well a
+site sets its HTTP security headers, not a guarantee that the site is secure.
+Header *values* are judged, not just presence:
+
+- **HSTS** counts only over HTTPS and requires `max-age` of at least 180 days.
+- **CSP** must be present and is penalized for `unsafe-eval` or a wildcard
+  `default-src`/`script-src`.
+- **Clickjacking protection** is satisfied by `X-Frame-Options` *or* a CSP
+  `frame-ancestors` directive.
+- **Referrer-Policy** must be a recognized value; **Permissions-Policy** must
+  contain a real directive.
+
+HSTS and CSP are weighted more heavily. The weighted score maps to a grade:
 
 | Grade | Coverage |
 | ----- | -------- |
@@ -108,15 +128,17 @@ curl -s -XPOST localhost:3000/api/sites \
 npm test
 ```
 
-The suite covers the security-header grading and value validation, the token
-sign/verify flow, the SSRF address checks, the database layer, and the HTTP API
-end to end (auth, SSRF blocking on add, rate limiting, and body-size limits).
+The suite covers header grading and value validation, redirect re-validation in
+the fetch layer, the token sign/verify flow, the SSRF address checks, input
+handling, the database layer, the scheduler, and the HTTP API end to end (auth,
+SSRF blocking on add, rate limiting, body-size and input limits).
 
 ## Notes
 
-- Checks are run on demand from the dashboard (or the API). Scheduling them on an
-  interval — with `cron` or a small loop — is a natural next step.
 - The SQLite file (`sentinel.db`) and `.env` are gitignored.
-- The SSRF guard resolves the host and validates it before fetching. A fully
-  robust deployment behind untrusted input would also pin the resolved address
-  through the request to close the DNS-rebinding gap.
+- The SSRF guard resolves the host and re-validates every redirect before
+  fetching. One residual gap remains: because the guard resolves DNS and `fetch`
+  then resolves again, a determined DNS-rebinding attack is still theoretically
+  possible. Closing it completely requires connecting to the validated IP while
+  preserving the original hostname for TLS and the `Host` header — a worthwhile
+  next step for a fully untrusted deployment.

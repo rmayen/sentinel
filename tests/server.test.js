@@ -69,6 +69,27 @@ test('adding a site enforces the SSRF guard', async () => {
   assert.equal(ok.status, 201);
 });
 
+test('malformed JSON is rejected with 400', async () => {
+  const res = await req('/api/login', { method: 'POST', body: '{ not json' });
+  assert.equal(res.status, 400);
+  assert.match((await res.json()).error, /invalid json/i);
+});
+
+test('overly long url and label are rejected', async () => {
+  const token = await tokenFor();
+  const headers = { authorization: `Bearer ${token}` };
+
+  const longUrl = 'http://93.184.216.34/' + 'a'.repeat(2100);
+  const r1 = await req('/api/sites', { method: 'POST', headers, body: JSON.stringify({ url: longUrl }) });
+  assert.equal(r1.status, 400);
+
+  const r2 = await req('/api/sites', {
+    method: 'POST', headers,
+    body: JSON.stringify({ url: 'http://93.184.216.34/', label: 'x'.repeat(200) }),
+  });
+  assert.equal(r2.status, 400);
+});
+
 test('oversized request bodies are rejected', async () => {
   const token = await tokenFor();
   const big = 'x'.repeat(70 * 1024);
