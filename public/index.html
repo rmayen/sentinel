@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sentinel — Uptime &amp; Security Monitor</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <div class="brand"><span class="dot"></span> Sentinel</div>
+    <button id="logout" class="ghost" hidden>Sign out</button>
+  </header>
+
+  <!-- Login -->
+  <main id="login-view" class="center">
+    <form id="login-form" class="card login">
+      <h1>Sign in</h1>
+      <p class="muted">Enter the monitor password to continue.</p>
+      <input id="password" type="password" placeholder="Password" autocomplete="current-password" required>
+      <button type="submit">Sign in</button>
+      <p id="login-error" class="error" hidden></p>
+    </form>
+  </main>
+
+  <!-- Dashboard -->
+  <main id="app-view" hidden>
+    <section class="card">
+      <h2>Add a site</h2>
+      <form id="add-form" class="row">
+        <input id="url" type="url" placeholder="https://example.com" required>
+        <input id="label" type="text" placeholder="Label (optional)">
+        <button type="submit">Add</button>
+      </form>
+      <p id="add-error" class="error" hidden></p>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
+        <h2>Monitored sites</h2>
+        <button id="check-all" class="ghost">Check all</button>
+      </div>
+      <table id="sites">
+        <thead>
+          <tr><th>Site</th><th>Status</th><th>Code</th><th>Response</th><th>Headers</th><th>Last checked</th><th></th></tr>
+        </thead>
+        <tbody id="sites-body"></tbody>
+      </table>
+      <p id="empty" class="muted" hidden>No sites yet — add one above to start monitoring.</p>
+    </section>
+  </main>
+
+  <!-- History drawer -->
+  <div id="drawer" class="drawer" hidden>
+    <div class="drawer-panel card">
+      <div class="section-head">
+        <h2 id="drawer-title">History</h2>
+        <button id="drawer-close" class="ghost">Close</button>
+      </div>
+      <table>
+        <thead><tr><th>When</th><th>Status</th><th>Code</th><th>Response</th><th>Grade</th></tr></thead>
+        <tbody id="history-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

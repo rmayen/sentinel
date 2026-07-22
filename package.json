@@ -1,0 +1,14 @@
+{
+  "name": "sentinel",
+  "version": "1.0.0",
+  "description": "Self-hosted uptime and HTTP security-header monitor. Zero-dependency Node backend with SQLite storage and a web dashboard.",
+  "type": "module",
+  "scripts": {
+    "start": "node --no-warnings src/server.js",
+    "test": "node --no-warnings --test"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "license": "MIT"
+}
